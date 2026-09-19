@@ -1,14 +1,16 @@
 {
-  "name": "spokyfy-live-server",
-  "version": "1.0.0",
-  "description": "Signaling server for Spokyfy's 1-on-1 Live mode (WebRTC matchmaking + rating relay)",
+  "name": "spokyfy",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Camera-first speaking confidence trainer with AI coaching and 1-on-1 live practice.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "socket.io": "^4.7.5"
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
   },
   "engines": {
     "node": ">=18"
