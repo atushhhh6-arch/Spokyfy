@@ -66,14 +66,15 @@ const CHALLENGES = [
   { title: "Mini story", prompt: "Tell a complete story about a recent mistake with a setup, turning point, and ending.", duration: 120, category: "Storytelling", xp: 30 },
   { title: "Client pitch", prompt: "Pitch your strongest skill to a client who has never met you.", duration: 60, category: "Business", xp: 25 },
   { title: "Teach it simply", prompt: "Teach one topic you know well as if the listener is a complete beginner.", duration: 120, category: "Content creation", xp: 30 },
-  { title: "Camera lens drill", prompt: "Talk about your biggest goal while looking at the camera lens at the end of every sentence.", duration: 90, category: "Networking", xp: 25 }
+  { title: "Camera lens drill", prompt: "Talk about your biggest goal while looking toward the camera lens at the end of every sentence.", duration: 90, category: "Networking", xp: 25 }
 ];
 
 const DEFAULT_PROFILE = {
   xp: 0,
   streak: 0,
   lastPracticeDate: null,
-  history: []
+  history: [],
+  aiPath: null
 };
 
 const state = {
@@ -81,7 +82,8 @@ const state = {
   category: "Content creation",
   mode: "Off-the-cuff",
   duration: 60,
-  prompt: PROMPTS["Content creation"][0],
+  prompt: "",
+  topicReady: false,
   mediaStream: null,
   mediaRecorder: null,
   recordedChunks: [],
@@ -101,11 +103,13 @@ const state = {
   lastSpokenAt: 0,
   pauseArmed: false,
   snapshots: [],
-  captureMilestones: [0.24, 0.52, 0.8],
+  captureMilestones: [0.12, 0.30, 0.48, 0.66, 0.84],
   capturedMilestones: new Set(),
   running: false,
-  metrics: null,
+  rawMetrics: null,
   analysis: null,
+  aiEnabled: null,
+  activeChallenge: null,
   profile: loadProfile(),
   live: {
     socket: null,
@@ -120,15 +124,26 @@ const state = {
 
 function loadProfile() {
   try {
-    const raw = JSON.parse(localStorage.getItem("spokyfy-profile-v2"));
-    return { ...DEFAULT_PROFILE, ...(raw || {}), history: Array.isArray(raw && raw.history) ? raw.history : [] };
+    const newer = localStorage.getItem("spokify-profile-v3");
+    const legacy = localStorage.getItem("spokyfy-profile-v2");
+    const raw = JSON.parse(newer || legacy || "null");
+    const profile = {
+      ...DEFAULT_PROFILE,
+      ...(raw || {}),
+      history: Array.isArray(raw && raw.history) ? raw.history : [],
+      aiPath: raw && raw.aiPath ? raw.aiPath : null
+    };
+    if (!newer && legacy) {
+      localStorage.setItem("spokify-profile-v3", JSON.stringify(profile));
+    }
+    return profile;
   } catch {
     return { ...DEFAULT_PROFILE };
   }
 }
 
 function saveProfile() {
-  localStorage.setItem("spokyfy-profile-v2", JSON.stringify(state.profile));
+  localStorage.setItem("spokify-profile-v3", JSON.stringify(state.profile));
 }
 
 function clamp(value, min, max) {
@@ -153,7 +168,7 @@ function levelName(level) {
   if (level < 30) return "Camera confident";
   if (level < 40) return "Strong communicator";
   if (level < 50) return "Natural presenter";
-  return "Spokyfy master";
+  return "Spokify master";
 }
 
 function xpProgress(xp) {
@@ -167,7 +182,7 @@ function toast(message) {
   el.textContent = message;
   el.classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove("show"), 2400);
+  toast.timer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
 function setView(view) {
@@ -178,7 +193,7 @@ function setView(view) {
     dashboard: "Build confidence one rep at a time.",
     practice: "Practice like the camera is already live.",
     live: "Get comfortable speaking to real people.",
-    challenges: "Train one speaking skill at a time.",
+    challenges: "Turn your fear into a challenge path.",
     progress: "Watch your reps compound."
   };
   $("#pageTitle").textContent = titles[view] || titles.dashboard;
@@ -192,7 +207,7 @@ function renderProfile() {
   const level = levelFromXp(xp);
   const progress = xpProgress(xp);
   const history = state.profile.history || [];
-  const last = history[0];
+  const last = history.find((item) => Number.isFinite(Number(item.overall)));
 
   $("#sideLevel").textContent = level;
   $("#sideLevelName").textContent = levelName(level);
@@ -208,7 +223,9 @@ function renderProfile() {
   $("#dashXpNext").textContent = progress.needed + " XP";
   $("#dashReps").textContent = history.length;
   $("#dashScore").textContent = last ? last.overall : "—";
-  $("#dashScoreText").textContent = last ? "Last rep · " + last.category + " · " + last.wpm + " WPM" : "Complete your first rep to unlock feedback.";
+  $("#dashScoreText").textContent = last
+    ? "Last AI-scored rep · " + last.category + " · " + last.wpm + " WPM"
+    : "Complete your first AI-scored rep to unlock feedback.";
 }
 
 function updateStreak() {
@@ -227,25 +244,56 @@ function updateStreak() {
   state.profile.lastPracticeDate = key;
 }
 
-function pickPrompt() {
-  const list = PROMPTS[state.category] || PROMPTS["Content creation"];
-  const current = state.prompt;
-  let next = list[Math.floor(Math.random() * list.length)];
-  if (list.length > 1 && next === current) next = list[(list.indexOf(next) + 1) % list.length];
-  state.prompt = next;
-  $("#practicePrompt").textContent = next;
+function setTopicWaiting() {
+  state.topicReady = false;
+  state.prompt = "";
+  $("#practicePrompt").textContent = "Category selected. Tap Spin Topic to get a prompt.";
+  $("#spinHint").textContent = state.category + " selected";
   $("#outlineBox").classList.add("hidden");
   $("#outlineBox").innerHTML = "";
   $("#scriptBox").classList.add("hidden");
   $("#scriptBox").textContent = "";
 }
 
+async function spinPrompt() {
+  if (state.running) return;
+  const list = PROMPTS[state.category] || PROMPTS["Content creation"];
+  const btn = $("#spinPromptBtn");
+  const box = $(".spin-result");
+  btn.disabled = true;
+  btn.classList.add("spinning");
+
+  for (let i = 0; i < 9; i += 1) {
+    $("#practicePrompt").textContent = list[Math.floor(Math.random() * list.length)];
+    await new Promise((resolve) => setTimeout(resolve, 60 + i * 14));
+  }
+
+  let next = list[Math.floor(Math.random() * list.length)];
+  if (next === state.prompt && list.length > 1) {
+    next = list[(list.indexOf(next) + 1) % list.length];
+  }
+  state.prompt = next;
+  state.topicReady = true;
+  $("#practicePrompt").textContent = next;
+  $("#spinHint").textContent = "Spin again for another " + state.category + " topic";
+  btn.classList.remove("spinning");
+  btn.disabled = false;
+  box.classList.add("flash");
+  setTimeout(() => box.classList.remove("flash"), 500);
+  $("#outlineBox").classList.add("hidden");
+  $("#scriptBox").classList.add("hidden");
+}
+
 function syncSetupUI() {
-  $("#practicePrompt").textContent = state.prompt;
+  $("#practicePrompt").textContent = state.topicReady ? state.prompt : "Choose a category above, then tap Spin Topic.";
   $("#timerPill").textContent = formatTime(state.duration);
+  $("#spinHint").textContent = state.topicReady
+    ? "Spin again for another " + state.category + " topic"
+    : state.category + " selected";
 }
 
 async function getOutline() {
+  if (!state.topicReady) return toast("Spin a topic first.");
   const btn = $("#outlineBtn");
   btn.disabled = true;
   btn.textContent = "Building outline…";
@@ -256,6 +304,8 @@ async function getOutline() {
       body: JSON.stringify({ prompt: state.prompt })
     });
     const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "AI outline failed.");
+
     const box = $("#outlineBox");
     box.innerHTML = "";
     (data.outline || []).forEach((line, index) => {
@@ -264,16 +314,16 @@ async function getOutline() {
       box.appendChild(p);
     });
     box.classList.remove("hidden");
-  } catch {
-    toast("Could not build an outline.");
+  } catch (error) {
+    toast(error.message || "Could not build an outline.");
   } finally {
     btn.disabled = false;
     btn.textContent = "Give me a 3-point outline";
   }
 }
 
-
 async function getScript() {
+  if (!state.topicReady) return toast("Spin a topic first.");
   const btn = $("#scriptBtn");
   btn.disabled = true;
   btn.textContent = "Writing sample…";
@@ -284,10 +334,11 @@ async function getScript() {
       body: JSON.stringify({ prompt: state.prompt })
     });
     const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "AI sample failed.");
     $("#scriptBox").textContent = data.script || "No sample available.";
     $("#scriptBox").classList.remove("hidden");
-  } catch {
-    toast("Could not generate a sample answer.");
+  } catch (error) {
+    toast(error.message || "Could not generate a sample answer.");
   } finally {
     btn.disabled = false;
     btn.textContent = "Show a sample answer";
@@ -309,6 +360,30 @@ async function ensureMedia() {
   return stream;
 }
 
+function resetScoreUI() {
+  const ids = [
+    "confidence", "clarity", "fluency", "eyeContact",
+    "expression", "postureFraming", "voiceDelivery"
+  ];
+  $("#overallScore").textContent = "—";
+  ids.forEach((id) => {
+    $("#" + id + "Score").textContent = "—";
+    $("#" + id + "Bar").style.width = "0%";
+    $("#" + id + "Evidence").textContent = "";
+  });
+  $("#analysisError").classList.add("hidden");
+  $("#analysisError").textContent = "";
+  $("#challengeResult").className = "challenge-result hidden";
+  $("#challengeResult").textContent = "";
+  $("#coachSummary").textContent = "Reviewing your performance…";
+  $("#nextDrill").textContent = "Loading…";
+  $("#contentFeedback").textContent = "";
+  $("#visualFeedback").textContent = "—";
+  $("#voiceFeedback").textContent = "—";
+  $("#strengthList").innerHTML = "";
+  $("#improvementList").innerHTML = "";
+}
+
 function resetSession() {
   clearInterval(state.timerId);
   clearInterval(state.meterId);
@@ -324,7 +399,7 @@ function resetSession() {
   state.pauseArmed = false;
   state.snapshots = [];
   state.capturedMilestones = new Set();
-  state.metrics = null;
+  state.rawMetrics = null;
   state.analysis = null;
   $("#wordCounter").textContent = "0 words";
   $("#liveTranscript").textContent = "Your transcript will appear here while you speak.";
@@ -336,13 +411,15 @@ function resetSession() {
   $("#downloadRecordingBtn").classList.add("hidden");
   $("#timerPill").textContent = formatTime(state.duration);
   $("#audioMeter").style.width = "0%";
+  $("#practiceAgainBtn").textContent = "Do another rep →";
+  resetScoreUI();
 }
 
 function startSpeechRecognition() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
     state.recognition = null;
-    $("#liveTranscript").textContent = "Live transcription is not supported in this browser. Your voice and camera metrics will still be scored.";
+    $("#liveTranscript").textContent = "Live transcription is not supported in this browser. AI can still review visual evidence and raw delivery metrics, but transcript-based scoring will be limited.";
     return;
   }
 
@@ -369,7 +446,9 @@ function startSpeechRecognition() {
   };
 
   recognition.onerror = (event) => {
-    if (event.error !== "no-speech" && event.error !== "aborted") console.warn("Speech recognition:", event.error);
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      console.warn("Speech recognition:", event.error);
+    }
   };
 
   recognition.onend = () => {
@@ -428,7 +507,7 @@ function captureSnapshot() {
   ctx.translate(canvas.width, 0);
   ctx.scale(-1, 1);
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.55);
+  return canvas.toDataURL("image/jpeg", 0.56);
 }
 
 function startFaceSampling() {
@@ -455,7 +534,7 @@ function startFaceSampling() {
       const centered = Math.abs(cx - 0.5) < 0.2 && Math.abs(cy - 0.46) < 0.25 ? 1 : 0;
       state.faceSamples.push({ visible: 1, centered });
     } catch {}
-  }, 750);
+  }, 700);
 }
 
 function startRecorder(stream) {
@@ -496,6 +575,11 @@ async function countdown() {
 
 async function startPractice() {
   if (state.running) return;
+  if (!state.topicReady || !state.prompt) {
+    toast("Choose a category and spin a topic first.");
+    return;
+  }
+
   $("#startPracticeBtn").disabled = true;
   try {
     const stream = await ensureMedia();
@@ -504,7 +588,9 @@ async function startPractice() {
 
     state.running = true;
     state.startedAt = performance.now();
-    $("#stageHeading").textContent = "Speak. Do not chase perfection.";
+    $("#stageHeading").textContent = state.activeChallenge
+      ? "Challenge in progress. Meet the success rule."
+      : "Speak. Do not chase perfection.";
     $("#recordingIndicator").classList.remove("hidden");
     $("#startPracticeBtn").classList.add("hidden");
     $("#startPracticeBtn").disabled = false;
@@ -522,14 +608,16 @@ async function startPractice() {
       const elapsed = (performance.now() - state.startedAt) / 1000;
       const remaining = state.duration - elapsed;
       $("#timerPill").textContent = formatTime(remaining);
+
       const fraction = elapsed / state.duration;
       state.captureMilestones.forEach((milestone, index) => {
-        if (fraction >= milestone && !state.capturedMilestones.has(index)) {
+        if (fraction >= milestone && !state.capturedMilestones.has(index) && state.snapshots.length < 6) {
           const frame = captureSnapshot();
           if (frame) state.snapshots.push(frame);
           state.capturedMilestones.add(index);
         }
       });
+
       if (remaining <= 0) finishPractice();
     }, 200);
   } catch (error) {
@@ -543,10 +631,16 @@ function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function computeMetrics(elapsedSeconds) {
+function standardDeviation(values) {
+  if (!values.length) return 0;
+  const mean = average(values);
+  return Math.sqrt(average(values.map((value) => Math.pow(value - mean, 2))));
+}
+
+function computeRawMetrics(elapsedSeconds) {
   const transcript = (state.finalTranscript + " " + state.interimTranscript).trim();
   const words = countWords(transcript);
-  const minutes = Math.max(elapsedSeconds / 60, 0.2);
+  const minutes = Math.max(elapsedSeconds / 60, 0.1);
   const wpm = Math.round(words / minutes);
 
   const fillers = ["um", "uh", "erm", "like", "basically", "actually", "literally", "you know", "i mean", "sort of", "kind of"];
@@ -557,43 +651,42 @@ function computeMetrics(elapsedSeconds) {
     fillerCount += matches ? matches.length : 0;
   });
 
-  const fillerRate = words ? (fillerCount / words) * 100 : 0;
-  const paceScore = words < 8 ? 45 : clamp(100 - Math.abs(wpm - 135) * 0.72, 40, 100);
-  const fluencyScore = clamp(100 - fillerRate * 7 - state.pauseCount * 2.5, 35, 100);
-
-  const audioAvg = average(state.audioSamples);
   const activeSamples = state.audioSamples.filter((v) => v > 0.018).length;
-  const activeRatio = state.audioSamples.length ? activeSamples / state.audioSamples.length : 0;
-  const voiceScore = clamp(40 + Math.min(audioAvg / 0.08, 1) * 35 + activeRatio * 25, 35, 100);
+  const voiceActivity = state.audioSamples.length ? (activeSamples / state.audioSamples.length) * 100 : 0;
+  const avgVolume = average(state.audioSamples);
+  const volumeStdDev = standardDeviation(state.audioSamples);
 
-  let cameraScore = 72;
-  if (state.faceSamples.length) {
-    const visible = average(state.faceSamples.map((sample) => sample.visible));
-    const centered = average(state.faceSamples.map((sample) => sample.centered));
-    cameraScore = clamp(visible * 62 + centered * 38, 25, 100);
-  }
-
-  const completion = clamp(elapsedSeconds / state.duration, 0, 1) * 100;
-  const clarityScore = clamp(paceScore * 0.5 + fluencyScore * 0.35 + voiceScore * 0.15, 35, 100);
-  const confidenceScore = clamp(cameraScore * 0.3 + voiceScore * 0.28 + fluencyScore * 0.2 + completion * 0.22, 35, 100);
-  const overall = Math.round(confidenceScore * 0.34 + clarityScore * 0.28 + fluencyScore * 0.22 + cameraScore * 0.16);
+  const faceVisible = state.faceSamples.length
+    ? average(state.faceSamples.map((sample) => sample.visible)) * 100
+    : null;
+  const centered = state.faceSamples.length
+    ? average(state.faceSamples.map((sample) => sample.centered)) * 100
+    : null;
 
   return {
     elapsedSeconds: Math.round(elapsedSeconds),
+    targetSeconds: state.duration,
+    completionPercent: Math.round(clamp(elapsedSeconds / state.duration, 0, 1) * 100),
     wordCount: words,
     wpm,
     fillerCount,
-    fillerRate: Number(fillerRate.toFixed(1)),
+    fillerRatePercent: words ? Number(((fillerCount / words) * 100).toFixed(1)) : 0,
     longPauses: state.pauseCount,
-    paceScore: Math.round(paceScore),
-    fluencyScore: Math.round(fluencyScore),
-    voiceScore: Math.round(voiceScore),
-    cameraScore: Math.round(cameraScore),
-    clarityScore: Math.round(clarityScore),
-    confidenceScore: Math.round(confidenceScore),
-    overall,
-    cameraMetricNote: state.faceSamples.length ? "Face visibility and centered framing proxy" : "Neutral camera score; FaceDetector unsupported"
+    voiceActivityPercent: Number(voiceActivity.toFixed(1)),
+    averageRmsVolume: Number(avgVolume.toFixed(4)),
+    volumeStdDev: Number(volumeStdDev.toFixed(4)),
+    faceVisiblePercent: faceVisible === null ? null : Math.round(faceVisible),
+    centeredFramingPercent: centered === null ? null : Math.round(centered),
+    faceDetectorAvailable: Boolean(state.faceSamples.length),
+    transcriptAvailable: Boolean(transcript)
   };
+}
+
+function renderRawMetrics(metrics) {
+  $("#metricWords").textContent = metrics.wordCount;
+  $("#metricWpm").textContent = metrics.wpm;
+  $("#metricFillers").textContent = metrics.fillerCount;
+  $("#metricPauses").textContent = metrics.longPauses;
 }
 
 async function finishPractice() {
@@ -614,19 +707,19 @@ async function finishPractice() {
   }
 
   const elapsed = Math.max(1, (performance.now() - state.startedAt) / 1000);
-  state.metrics = computeMetrics(elapsed);
+  state.rawMetrics = computeRawMetrics(elapsed);
+  renderRawMetrics(state.rawMetrics);
+
   $("#recordingIndicator").classList.add("hidden");
   $("#finishPracticeBtn").classList.add("hidden");
   $("#startPracticeBtn").classList.remove("hidden");
   $("#stageHeading").textContent = "Rep complete.";
   $("#timerPill").textContent = formatTime(Math.max(0, state.duration - elapsed));
-
-  renderScores(state.metrics);
   $("#resultsPanel").classList.remove("hidden");
+  $("#analysisProvider").textContent = "ChatGPT API is reviewing transcript, delivery evidence and camera snapshots…";
   $("#resultsPanel").scrollIntoView({ behavior: "smooth", block: "start" });
 
   const transcript = (state.finalTranscript + " " + state.interimTranscript).trim();
-  $("#analysisProvider").textContent = "AI coach is reviewing your rep…";
 
   try {
     const response = await fetch("/api/analyze", {
@@ -637,52 +730,53 @@ async function finishPractice() {
         category: state.category,
         mode: state.mode,
         transcript,
-        metrics: state.metrics,
-        frames: state.snapshots.slice(0, 3)
+        rawMetrics: state.rawMetrics,
+        frames: state.snapshots.slice(0, 6),
+        challenge: state.activeChallenge
+          ? { title: state.activeChallenge.title, successRule: state.activeChallenge.successRule }
+          : null
       })
     });
-    state.analysis = await response.json();
-  } catch {
-    state.analysis = {
-      provider: "offline",
-      summary: "Your rep was saved, but coaching feedback could not reach the server.",
-      strengths: ["You completed the practice session."],
-      improvements: ["Repeat the same prompt and focus on one measurable habit."],
-      nextDrill: "Repeat the prompt for 60 seconds with a clear hook, two points, and a close.",
-      contentFeedback: "Your local speaking metrics are still available above."
-    };
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "AI analysis failed.");
+
+    state.analysis = data;
+    renderAnalysis(data);
+    applyChallengeResult(data);
+    saveSession();
+  } catch (error) {
+    state.analysis = null;
+    renderAnalysisError(error.message || "AI analysis failed.");
   }
-
-  renderCoach(state.analysis);
-  saveSession();
 }
 
-function renderScores(metrics) {
-  const map = [
-    ["confidenceScore", metrics.confidenceScore, "confidenceBar"],
-    ["clarityScore", metrics.clarityScore, "clarityBar"],
-    ["fluencyScore", metrics.fluencyScore, "fluencyBar"],
-    ["cameraScore", metrics.cameraScore, "cameraBar"]
+function renderAnalysis(analysis) {
+  const scoreMap = [
+    ["confidence", analysis.scores.confidence],
+    ["clarity", analysis.scores.clarity],
+    ["fluency", analysis.scores.fluency],
+    ["eyeContact", analysis.scores.eyeContact],
+    ["expression", analysis.scores.expression],
+    ["postureFraming", analysis.scores.postureFraming],
+    ["voiceDelivery", analysis.scores.voiceDelivery]
   ];
-  $("#overallScore").textContent = metrics.overall;
-  map.forEach(([textId, value, barId]) => {
-    $("#" + textId).textContent = value;
-    setTimeout(() => { $("#" + barId).style.width = value + "%"; }, 50);
-  });
-  $("#metricWords").textContent = metrics.wordCount;
-  $("#metricWpm").textContent = metrics.wpm;
-  $("#metricFillers").textContent = metrics.fillerCount;
-  $("#metricPauses").textContent = metrics.longPauses;
-}
 
-function renderCoach(analysis) {
+  $("#analysisError").classList.add("hidden");
+  $("#overallScore").textContent = analysis.overall;
+  scoreMap.forEach(([id, value]) => {
+    $("#" + id + "Score").textContent = value;
+    $("#" + id + "Evidence").textContent = analysis.evidence && analysis.evidence[id] ? analysis.evidence[id] : "";
+    setTimeout(() => { $("#" + id + "Bar").style.width = value + "%"; }, 50);
+  });
+
   $("#analysisProvider").textContent =
-    analysis.provider === "openai"
-      ? "Deep AI coach · transcript + metrics" + (state.snapshots.length ? " + camera snapshots" : "")
-      : "Spokyfy local coach · metrics-based feedback";
+    "AI-scored · " + (analysis.model || "OpenAI") + " · transcript + raw delivery data + " + state.snapshots.length + " camera snapshots";
   $("#coachSummary").textContent = analysis.summary || "Rep reviewed.";
-  $("#nextDrill").textContent = analysis.nextDrill || "Repeat the same prompt once more.";
+  $("#nextDrill").textContent = analysis.nextDrill || "Repeat the same prompt with one focused improvement.";
   $("#contentFeedback").textContent = analysis.contentFeedback || "";
+  $("#visualFeedback").textContent = analysis.visualFeedback || "No visual feedback returned.";
+  $("#voiceFeedback").textContent = analysis.voiceFeedback || "No voice feedback returned.";
 
   const renderList = (selector, values) => {
     const list = $(selector);
@@ -697,14 +791,56 @@ function renderCoach(analysis) {
   renderList("#improvementList", analysis.improvements);
 }
 
+function renderAnalysisError(message) {
+  resetScoreUI();
+  $("#resultsPanel").classList.remove("hidden");
+  $("#analysisProvider").textContent = "AI score unavailable — no fake fallback score was generated.";
+  const errorBox = $("#analysisError");
+  errorBox.textContent = message + " Check OPENAI_API_KEY on the server and retry the rep.";
+  errorBox.classList.remove("hidden");
+  $("#coachSummary").textContent = "This rep was not scored.";
+  $("#nextDrill").textContent = "Fix the AI connection, then repeat the rep for a real score.";
+  $("#contentFeedback").textContent = "Your raw word count, pace, filler and pause data are still shown above.";
+  $("#practiceAgainBtn").textContent = state.activeChallenge ? "Retry this challenge →" : "Retry rep →";
+}
+
+function applyChallengeResult(analysis) {
+  const box = $("#challengeResult");
+  if (!state.activeChallenge) {
+    box.className = "challenge-result hidden";
+    return;
+  }
+
+  const path = state.profile.aiPath;
+  const completed = new Set(path && Array.isArray(path.completedIds) ? path.completedIds : []);
+
+  if (analysis.challengePassed) {
+    completed.add(state.activeChallenge.id);
+    if (path) {
+      path.completedIds = Array.from(completed);
+      state.profile.aiPath = path;
+      saveProfile();
+    }
+    box.className = "challenge-result pass";
+    box.textContent = "✓ Challenge passed. " + (analysis.challengeFeedback || "The next task is now unlocked.");
+    $("#practiceAgainBtn").textContent = "Go to next challenge →";
+    toast("Challenge passed · next task unlocked");
+  } else {
+    box.className = "challenge-result retry";
+    box.textContent = "↻ Not passed yet. " + (analysis.challengeFeedback || "Retry this task using the AI feedback.");
+    $("#practiceAgainBtn").textContent = "Retry this challenge →";
+  }
+}
+
 function saveSession() {
-  const metrics = state.metrics;
-  if (!metrics) return;
+  if (!state.analysis || !state.rawMetrics) return;
 
   updateStreak();
-  const baseXp = Math.max(25, Math.round(metrics.overall * 0.7));
-  const durationBonus = Math.min(20, Math.round(metrics.elapsedSeconds / 30) * 3);
-  const earnedXp = baseXp + durationBonus;
+  const overall = Number(state.analysis.overall) || 0;
+  const baseXp = Math.max(25, Math.round(overall * 0.7));
+  const durationBonus = Math.min(20, Math.round(state.rawMetrics.elapsedSeconds / 30) * 3);
+  const challengeBonus = state.activeChallenge && state.analysis.challengePassed ? 25 : 0;
+  const earnedXp = baseXp + durationBonus + challengeBonus;
   state.profile.xp = (state.profile.xp || 0) + earnedXp;
 
   state.profile.history.unshift({
@@ -713,24 +849,139 @@ function saveSession() {
     category: state.category,
     mode: state.mode,
     prompt: state.prompt,
-    duration: metrics.elapsedSeconds,
-    overall: metrics.overall,
-    confidence: metrics.confidenceScore,
-    clarity: metrics.clarityScore,
-    fluency: metrics.fluencyScore,
-    camera: metrics.cameraScore,
-    wpm: metrics.wpm,
-    words: metrics.wordCount,
-    fillers: metrics.fillerCount,
-    xp: earnedXp
+    duration: state.rawMetrics.elapsedSeconds,
+    overall,
+    confidence: state.analysis.scores.confidence,
+    clarity: state.analysis.scores.clarity,
+    fluency: state.analysis.scores.fluency,
+    eyeContact: state.analysis.scores.eyeContact,
+    expression: state.analysis.scores.expression,
+    postureFraming: state.analysis.scores.postureFraming,
+    voiceDelivery: state.analysis.scores.voiceDelivery,
+    wpm: state.rawMetrics.wpm,
+    words: state.rawMetrics.wordCount,
+    fillers: state.rawMetrics.fillerCount,
+    xp: earnedXp,
+    challengeId: state.activeChallenge ? state.activeChallenge.id : null,
+    challengePassed: state.activeChallenge ? Boolean(state.analysis.challengePassed) : null
   });
   state.profile.history = state.profile.history.slice(0, 100);
   saveProfile();
   renderProfile();
-  toast("Rep saved · +" + earnedXp + " XP");
+  toast("AI-scored rep saved · +" + earnedXp + " XP");
+}
+
+async function generateFearPlan() {
+  const fear = $("#fearInput").value.trim();
+  if (!fear) return toast("Write your speaking or camera fear first.");
+
+  const btn = $("#fearPlanBtn");
+  const status = $("#fearStatus");
+  btn.disabled = true;
+  btn.textContent = "AI is building…";
+  status.textContent = "Creating a progressive 6-step path…";
+
+  try {
+    const response = await fetch("/api/fear-challenges", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fear })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not build challenge path.");
+
+    state.profile.aiPath = {
+      fear,
+      title: data.plan.title,
+      intro: data.plan.intro,
+      challenges: data.plan.challenges,
+      completedIds: [],
+      createdAt: new Date().toISOString()
+    };
+    saveProfile();
+    renderAiPath();
+    status.textContent = "Path created. Task 1 is unlocked.";
+    toast("Your AI challenge path is ready.");
+  } catch (error) {
+    status.textContent = error.message || "Could not create the path.";
+    toast(status.textContent);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ask AI →";
+  }
+}
+
+function resetAiPath() {
+  state.profile.aiPath = null;
+  state.activeChallenge = null;
+  saveProfile();
+  $("#fearInput").value = "";
+  $("#fearStatus").textContent = "Your challenge path is saved on this device.";
+  renderAiPath();
+}
+
+function startAiChallenge(challenge) {
+  state.activeChallenge = challenge;
+  state.category = challenge.category;
+  state.duration = challenge.duration;
+  state.mode = "Off-the-cuff";
+  state.prompt = challenge.prompt;
+  state.topicReady = true;
+  syncSetupControls();
+  $("#spinHint").textContent = "AI challenge topic locked";
+  setView("practice");
+  toast("Challenge loaded · " + challenge.title);
+}
+
+function renderAiPath() {
+  const section = $("#aiPathSection");
+  const grid = $("#aiChallengeGrid");
+  const path = state.profile.aiPath;
+
+  if (!path || !Array.isArray(path.challenges) || !path.challenges.length) {
+    section.classList.add("hidden");
+    grid.innerHTML = "";
+    return;
+  }
+
+  section.classList.remove("hidden");
+  $("#aiPathTitle").textContent = path.title || "Your challenge path";
+  $("#aiPathIntro").textContent = path.intro || "";
+  $("#fearInput").value = path.fear || "";
+
+  const completed = new Set(Array.isArray(path.completedIds) ? path.completedIds : []);
+  grid.innerHTML = "";
+
+  path.challenges.forEach((challenge, index) => {
+    const isCompleted = completed.has(challenge.id);
+    const previousCompleted = index === 0 || completed.has(path.challenges[index - 1].id);
+    const unlocked = isCompleted || previousCompleted;
+
+    const card = document.createElement("article");
+    card.className = "challenge-card" + (isCompleted ? " completed" : "") + (!unlocked ? " locked" : "");
+    card.innerHTML =
+      '<span class="num">STEP ' + (index + 1) + " / " + path.challenges.length + "</span>" +
+      "<h3></h3><p class=\"challenge-description\"></p>" +
+      '<div class="success-rule"></div>' +
+      '<div class="lock-state"></div>' +
+      '<button class="secondary-button"></button>';
+
+    $("h3", card).textContent = challenge.title;
+    $(".challenge-description", card).textContent = challenge.description + " · " + challenge.duration + " sec";
+    $(".success-rule", card).textContent = "Pass rule: " + challenge.successRule;
+    $(".lock-state", card).textContent = isCompleted ? "✓ Completed" : unlocked ? "● Unlocked" : "🔒 Complete the previous task first";
+
+    const button = $("button", card);
+    button.textContent = isCompleted ? "Practice again" : unlocked ? "Start task" : "Locked";
+    button.disabled = !unlocked;
+    if (unlocked) button.addEventListener("click", () => startAiChallenge(challenge));
+    grid.appendChild(card);
+  });
 }
 
 function renderChallenges() {
+  renderAiPath();
+
   const grid = $("#challengeGrid");
   grid.innerHTML = "";
   CHALLENGES.forEach((challenge, index) => {
@@ -742,9 +993,11 @@ function renderChallenges() {
     $("h3", card).textContent = challenge.title;
     $("p", card).textContent = challenge.prompt + " · " + challenge.duration + " sec";
     $("button", card).addEventListener("click", () => {
+      state.activeChallenge = null;
       state.category = challenge.category;
       state.duration = challenge.duration;
       state.prompt = challenge.prompt;
+      state.topicReady = true;
       syncSetupControls();
       setView("practice");
     });
@@ -754,26 +1007,30 @@ function renderChallenges() {
 
 function renderProgress() {
   const history = state.profile.history || [];
+  const scored = history.filter((item) => Number.isFinite(Number(item.overall)));
   const level = levelFromXp(state.profile.xp || 0);
   const progress = xpProgress(state.profile.xp || 0);
+
   $("#progressLevel").textContent = String(level).padStart(2, "0");
   $("#progressLevelName").textContent = levelName(level);
   $("#progressXpBar").style.width = progress.pct + "%";
-  $("#progressXpText").textContent = level >= 50 ? "Maximum level reached" : (progress.needed - progress.current) + " XP until Level " + (level + 1);
-  $("#bestScore").textContent = history.length ? Math.max(...history.map((item) => item.overall || 0)) : "—";
+  $("#progressXpText").textContent = level >= 50
+    ? "Maximum level reached"
+    : (progress.needed - progress.current) + " XP until Level " + (level + 1);
+  $("#bestScore").textContent = scored.length ? Math.max(...scored.map((item) => Number(item.overall) || 0)) : "—";
   $("#totalMinutes").textContent = Math.round(history.reduce((sum, item) => sum + (item.duration || 0), 0) / 60);
   $("#historyCount").textContent = history.length + " REPS";
 
   const chart = $("#scoreChart");
   chart.innerHTML = "";
-  const recent = history.slice(0, 10).reverse();
+  const recent = scored.slice(0, 10).reverse();
   if (!recent.length) {
-    chart.innerHTML = '<div class="empty">Your score trend will appear after your first rep.</div>';
+    chart.innerHTML = '<div class="empty">Your AI score trend will appear after your first scored rep.</div>';
   } else {
     recent.forEach((item) => {
       const bar = document.createElement("div");
       bar.className = "chart-bar";
-      bar.style.height = clamp(item.overall, 10, 100) + "%";
+      bar.style.height = clamp(Number(item.overall) || 0, 10, 100) + "%";
       const label = document.createElement("span");
       label.textContent = item.overall;
       bar.appendChild(label);
@@ -793,12 +1050,12 @@ function renderProgress() {
     row.className = "history-item";
     const date = new Date(item.date);
     row.innerHTML =
-      '<div class="history-score">' + item.overall + "</div>" +
+      '<div class="history-score">' + (Number.isFinite(Number(item.overall)) ? item.overall : "—") + "</div>" +
       "<div><h4></h4><p></p></div>" +
-      '<span class="history-meta">' + item.wpm + " WPM</span>" +
-      '<span class="history-meta">+' + item.xp + " XP</span>";
+      '<span class="history-meta">' + (item.wpm || 0) + " WPM</span>" +
+      '<span class="history-meta">+' + (item.xp || 0) + " XP</span>";
     $("h4", row).textContent = item.prompt;
-    $("p", row).textContent = item.category + " · " + date.toLocaleDateString() + " · " + Math.round(item.duration) + " sec";
+    $("p", row).textContent = item.category + " · " + date.toLocaleDateString() + " · " + Math.round(item.duration || 0) + " sec";
     list.appendChild(row);
   });
 }
@@ -811,12 +1068,12 @@ function syncSetupControls() {
 }
 
 async function shareResult() {
-  if (!state.metrics) return;
+  if (!state.analysis || !state.rawMetrics) return toast("Complete an AI-scored rep first.");
   const text =
-    "I scored " + state.metrics.overall + "/100 on my Spokyfy speaking rep — " +
-    state.metrics.wpm + " WPM, " + state.metrics.fillerCount + " fillers. Camera confidence is a skill.";
+    "I scored " + state.analysis.overall + "/100 on my Spokify speaking rep — " +
+    state.rawMetrics.wpm + " WPM, " + state.rawMetrics.fillerCount + " fillers. Camera confidence is a skill.";
   if (navigator.share) {
-    try { await navigator.share({ title: "My Spokyfy result", text }); } catch {}
+    try { await navigator.share({ title: "My Spokify result", text }); } catch {}
   } else {
     try {
       await navigator.clipboard.writeText(text);
@@ -835,6 +1092,7 @@ function playRecording() {
   video.play().catch(() => {});
 }
 
+// ----- Live mode -----
 async function liveMedia() {
   if (state.live.stream && state.live.stream.active) return state.live.stream;
   state.live.stream = await navigator.mediaDevices.getUserMedia({
@@ -905,7 +1163,9 @@ async function setupPeer(initiator) {
     if (event.streams && event.streams[0]) $("#liveRemoteVideo").srcObject = event.streams[0];
   };
   pc.onicecandidate = (event) => {
-    if (event.candidate) state.live.socket.emit("signal", { roomId: state.live.roomId, data: event.candidate });
+    if (event.candidate) {
+      state.live.socket.emit("signal", { roomId: state.live.roomId, data: event.candidate });
+    }
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected") {
@@ -974,20 +1234,29 @@ function leaveLive(emit = true) {
 function bindEvents() {
   $$("[data-view]").forEach((btn) => btn.addEventListener("click", () => setView(btn.dataset.view)));
 
-  ["#quickPracticeBtn", "#heroStartBtn"].forEach((selector) => $(selector).addEventListener("click", () => setView("practice")));
+  ["#quickPracticeBtn", "#heroStartBtn"].forEach((selector) => {
+    $(selector).addEventListener("click", () => {
+      state.activeChallenge = null;
+      setView("practice");
+    });
+  });
+
   $("#dailyStartBtn").addEventListener("click", () => {
+    state.activeChallenge = null;
     state.category = "Opinion";
     state.mode = "Off-the-cuff";
     state.duration = 90;
     state.prompt = $("#dailyPrompt").textContent.trim();
+    state.topicReady = true;
     syncSetupControls();
     setView("practice");
   });
 
   $$("#categoryChips .chip").forEach((btn) => btn.addEventListener("click", () => {
+    state.activeChallenge = null;
     state.category = btn.dataset.category;
     $$("#categoryChips .chip").forEach((item) => item.classList.toggle("active", item === btn));
-    pickPrompt();
+    setTopicWaiting();
   }));
 
   $$("#modePicker button").forEach((btn) => btn.addEventListener("click", () => {
@@ -1001,18 +1270,39 @@ function bindEvents() {
     $("#timerPill").textContent = formatTime(state.duration);
   }));
 
-  $("#spinPromptBtn").addEventListener("click", pickPrompt);
+  $("#spinPromptBtn").addEventListener("click", spinPrompt);
   $("#outlineBtn").addEventListener("click", getOutline);
   $("#scriptBtn").addEventListener("click", getScript);
   $("#startPracticeBtn").addEventListener("click", startPractice);
   $("#finishPracticeBtn").addEventListener("click", finishPractice);
+
   $("#practiceAgainBtn").addEventListener("click", () => {
+    if (state.activeChallenge) {
+      if (state.analysis && state.analysis.challengePassed) {
+        state.activeChallenge = null;
+        resetSession();
+        setView("challenges");
+      } else {
+        const challenge = state.activeChallenge;
+        resetSession();
+        state.prompt = challenge.prompt;
+        state.topicReady = true;
+        syncSetupControls();
+        $("#setupPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
     resetSession();
-    pickPrompt();
+    setTopicWaiting();
     $("#setupPanel").scrollIntoView({ behavior: "smooth", block: "start" });
   });
+
   $("#playRecordingBtn").addEventListener("click", playRecording);
   $("#shareResultBtn").addEventListener("click", shareResult);
+
+  $("#fearPlanBtn").addEventListener("click", generateFearPlan);
+  $("#resetAiPathBtn").addEventListener("click", resetAiPath);
 
   $("#playerRoleBtn").addEventListener("click", () => startLiveSearch("player"));
   $("#seekerRoleBtn").addEventListener("click", () => startLiveSearch("seeker"));
@@ -1043,9 +1333,14 @@ function init() {
   fetch("/api/health")
     .then((response) => response.json())
     .then((health) => {
-      if (health.aiEnabled) console.info("Spokyfy deep AI enabled.");
+      state.aiEnabled = Boolean(health.aiEnabled);
+      if (!state.aiEnabled) {
+        console.warn("Spokify AI scoring is disabled until OPENAI_API_KEY is configured.");
+      }
     })
-    .catch(() => {});
+    .catch(() => {
+      state.aiEnabled = false;
+    });
 }
 
 init();
