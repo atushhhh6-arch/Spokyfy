@@ -177,6 +177,48 @@ function xpProgress(xp) {
   return { current, needed: 250, pct: (current / 250) * 100 };
 }
 
+
+async function readApiJson(response, label = "API") {
+  const raw = await response.text();
+  let data = {};
+
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      const looksLikeHtml = /^\s*</.test(raw);
+      const message = looksLikeHtml
+        ? label + " returned a webpage instead of JSON. Your Node backend/API is probably not running on this deployment."
+        : label + " returned an invalid response: " + raw.slice(0, 180);
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      data && data.error
+        ? data.error
+        : label + " failed with HTTP " + response.status + (raw ? "." : " and returned an empty response.");
+    const error = new Error(message);
+    error.status = response.status;
+    error.details = data && data.detail ? data.detail : "";
+    throw error;
+  }
+
+  if (!raw) {
+    const error = new Error(
+      label + " returned an empty response. The backend may have crashed, timed out, or is not deployed."
+    );
+    error.status = response.status;
+    throw error;
+  }
+
+  return data;
+}
+
+
 function toast(message) {
   const el = $("#toast");
   el.textContent = message;
@@ -303,8 +345,7 @@ async function getOutline() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: state.prompt })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "AI outline failed.");
+    const data = await readApiJson(response, "Spokify AI outline");
 
     const box = $("#outlineBox");
     box.innerHTML = "";
@@ -333,8 +374,7 @@ async function getScript() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: state.prompt })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "AI sample failed.");
+    const data = await readApiJson(response, "Spokify AI sample");
     $("#scriptBox").textContent = data.script || "No sample available.";
     $("#scriptBox").classList.remove("hidden");
   } catch (error) {
@@ -738,8 +778,7 @@ async function finishPractice() {
       })
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "AI analysis failed.");
+    const data = await readApiJson(response, "Spokify AI analysis");
 
     state.analysis = data;
     renderAnalysis(data);
@@ -747,7 +786,8 @@ async function finishPractice() {
     saveSession();
   } catch (error) {
     state.analysis = null;
-    renderAnalysisError(error.message || "AI analysis failed.");
+    const detail = error && error.details ? " " + error.details : "";
+    renderAnalysisError((error.message || "AI analysis failed.") + detail);
   }
 }
 
@@ -887,8 +927,7 @@ async function generateFearPlan() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fear })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not build challenge path.");
+    const data = await readApiJson(response, "Spokify AI challenge builder");
 
     state.profile.aiPath = {
       fear,
@@ -1331,7 +1370,7 @@ function init() {
   bindEvents();
 
   fetch("/api/health")
-    .then((response) => response.json())
+    .then((response) => readApiJson(response, "Spokify backend"))
     .then((health) => {
       state.aiEnabled = Boolean(health.aiEnabled);
       if (!state.aiEnabled) {
