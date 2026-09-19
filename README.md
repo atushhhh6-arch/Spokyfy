@@ -27,9 +27,9 @@ Set:
 
 Optional:
 
-    OPENAI_MODEL=gpt-6-astra
+    OPENAI_MODEL=gpt-5.6-luna
 
-If OPENAI_MODEL is not set, the server uses gpt-6-astra.
+If OPENAI_MODEL is not set, the server uses gpt-5.6-luna.
 
 The key stays on the server. Never put it inside public/app.js.
 
@@ -99,3 +99,15 @@ Live 1-on-1 mode uses Socket.IO + WebRTC, so the host must support WebSockets.
 - The Node server does not store recordings.
 - AI scoring receives the transcript, raw metrics, challenge rule when relevant, and up to six low-resolution snapshots.
 - 1-on-1 video/audio is peer-to-peer WebRTC; the server relays signaling only.
+
+
+## Troubleshooting AI
+
+If the UI says the backend returned an empty response or a webpage instead of JSON:
+
+1. Confirm the deployment is running `node server.js` / `npm start`, not only serving the `public/` folder.
+2. Set `OPENAI_API_KEY` in the server host environment.
+3. Use a valid OpenAI model ID such as `gpt-5.6-luna`.
+4. Open `/api/health` on the deployed domain. It should return JSON with `"ok": true` and `"aiEnabled": true`.
+
+A static-only deployment cannot run the AI endpoints or Socket.IO live mode.
