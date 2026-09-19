@@ -151,6 +151,38 @@ app.post("/api/outline", async (req, res) => {
   }
 });
 
+
+app.post("/api/script", async (req, res) => {
+  const prompt = cleanString(req.body && req.body.prompt, 500);
+  if (!prompt) return res.status(400).json({ error: "Prompt is required." });
+
+  const fallback =
+    "Start with your direct answer to the topic. Then explain your first reason with one real example. " +
+    "Add a second point that gives a different angle. Finish by repeating the main idea in one memorable sentence.";
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.json({ script: fallback, provider: "spokyfy-local" });
+  }
+
+  try {
+    const text = await callOpenAI([
+      {
+        type: "input_text",
+        text:
+          "You are a speaking coach. Write a natural 90-130 word sample spoken answer to this prompt. " +
+          "Use simple conversational English, a strong first sentence, two clear points, and a clean closing. " +
+          "Do not use headings, bullets, markdown, or overly formal language. The user should learn from it, not read it word-for-word.\n\nPrompt: " +
+          prompt
+      }
+    ], 350);
+
+    res.json({ script: cleanString(text, 1800) || fallback, provider: "openai" });
+  } catch (error) {
+    console.error(error.message);
+    res.json({ script: fallback, provider: "spokyfy-local", warning: "AI unavailable; local sample used." });
+  }
+});
+
 app.post("/api/analyze", async (req, res) => {
   const body = req.body || {};
   const payload = {
