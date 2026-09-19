@@ -236,6 +236,8 @@ function pickPrompt() {
   $("#practicePrompt").textContent = next;
   $("#outlineBox").classList.add("hidden");
   $("#outlineBox").innerHTML = "";
+  $("#scriptBox").classList.add("hidden");
+  $("#scriptBox").textContent = "";
 }
 
 function syncSetupUI() {
@@ -267,6 +269,28 @@ async function getOutline() {
   } finally {
     btn.disabled = false;
     btn.textContent = "Give me a 3-point outline";
+  }
+}
+
+
+async function getScript() {
+  const btn = $("#scriptBtn");
+  btn.disabled = true;
+  btn.textContent = "Writing sample…";
+  try {
+    const response = await fetch("/api/script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: state.prompt })
+    });
+    const data = await response.json();
+    $("#scriptBox").textContent = data.script || "No sample available.";
+    $("#scriptBox").classList.remove("hidden");
+  } catch {
+    toast("Could not generate a sample answer.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Show a sample answer";
   }
 }
 
@@ -979,6 +1003,7 @@ function bindEvents() {
 
   $("#spinPromptBtn").addEventListener("click", pickPrompt);
   $("#outlineBtn").addEventListener("click", getOutline);
+  $("#scriptBtn").addEventListener("click", getScript);
   $("#startPracticeBtn").addEventListener("click", startPractice);
   $("#finishPracticeBtn").addEventListener("click", finishPractice);
   $("#practiceAgainBtn").addEventListener("click", () => {
