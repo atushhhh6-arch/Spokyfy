@@ -9,71 +9,12 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-app.use(express.json({ limit: "8mb" }));
+app.use(express.json({ limit: "12mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const cleanString = (value, max = 6000) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
-
-function fallbackCoach(payload) {
-  const m = payload.metrics || {};
-  const pace = Number(m.paceScore || 0);
-  const fluency = Number(m.fluencyScore || 0);
-  const confidence = Number(m.confidenceScore || 0);
-  const camera = Number(m.cameraScore || 0);
-  const clarity = Number(m.clarityScore || 0);
-  const overall = Number(m.overall || 0);
-  const wpm = Number(m.wpm || 0);
-  const fillers = Number(m.fillerCount || 0);
-  const words = Number(m.wordCount || 0);
-
-  const strengths = [];
-  if (pace >= 78) strengths.push("Your speaking pace was easy to follow.");
-  if (fluency >= 78) strengths.push("You kept the delivery flowing with relatively few interruptions.");
-  if (camera >= 78) strengths.push("You stayed visually present and centered for most of the session.");
-  if (clarity >= 78) strengths.push("Your delivery metrics suggest clear, controlled speech.");
-  if (!strengths.length) strengths.push("You completed a full practice rep, which is the fastest way to build camera confidence.");
-
-  const improvements = [];
-  if (wpm && wpm < 105) improvements.push("Increase pace slightly. Aim for roughly 115–155 words per minute for conversational delivery.");
-  if (wpm > 170) improvements.push("Slow down and add deliberate pauses after key ideas.");
-  if (fillers > Math.max(3, words * 0.05)) improvements.push("Replace filler words with a short silent pause. Silence sounds more confident than repeated fillers.");
-  if (camera < 72) improvements.push("Keep your face near the center of the frame and look toward the camera lens at the end of important sentences.");
-  if (confidence < 72) improvements.push("Use a stronger first sentence and finish each thought completely before moving to the next idea.");
-  if (improvements.length < 2) improvements.push("Add a simple structure: hook, two supporting points, then one clear closing sentence.");
-
-  let summary = "Solid practice rep.";
-  if (overall >= 85) summary = "Strong performance. Your delivery looked controlled and confident across most measured areas.";
-  else if (overall >= 70) summary = "Good performance with a few specific habits that can make you sound noticeably more confident.";
-  else summary = "Useful practice session. Focus on one improvement at a time instead of trying to fix everything in the next rep.";
-
-  return {
-    provider: "spokyfy-local",
-    summary,
-    strengths: strengths.slice(0, 3),
-    improvements: improvements.slice(0, 4),
-    nextDrill:
-      pace < 70
-        ? "Do a 60-second rep where you intentionally pause for one second after every complete idea."
-        : camera < 70
-          ? "Do a 60-second camera-lens drill: look at the lens for the final five words of every sentence."
-          : "Repeat the same topic for 60 seconds using only three sections: hook, two points, close.",
-    contentFeedback:
-      words < 45
-        ? "Your transcript was short. Build each point with one reason and one example."
-        : "Your response had enough material to review. On the next rep, make the opening and closing more deliberate."
-  };
-}
-
-function fallbackOutline(prompt) {
-  const topic = cleanString(prompt, 400) || "your topic";
-  return [
-    "HOOK — Say one surprising, personal, or opinionated sentence about: " + topic,
-    "BODY — Give two clear points. For each point, add one reason or real example.",
-    "CLOSE — End with one sentence that summarizes what you want the listener to remember."
-  ];
-}
 
 function responseText(data) {
   if (data && typeof data.output_text === "string") return data.output_text.trim();
@@ -87,36 +28,148 @@ function responseText(data) {
   return parts.join("\n").trim();
 }
 
-async function callOpenAI(content, maxOutputTokens = 1200) {
-  if (!process.env.OPENAI_API_KEY) return null;
-  const model = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+async function callOpenAI({ content, maxOutputTokens = 1400, format = null }) {
+  if (!process.env.OPENAI_API_KEY) {
+    const error = new Error("OPENAI_API_KEY is not configured.");
+    error.code = "AI_NOT_CONFIGURED";
+    throw error;
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-6-astra";
+  const body = {
+    model,
+    max_output_tokens: maxOutputTokens,
+    store: false,
+    input: [{ role: "user", content }]
+  };
+  if (format) body.text = { format };
+
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + process.env.OPENAI_API_KEY
     },
-    body: JSON.stringify({
-      model,
-      reasoning: { effort: "low" },
-      max_output_tokens: maxOutputTokens,
-      input: [{ role: "user", content }]
-    })
+    body: JSON.stringify(body)
   });
 
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error("AI request failed: " + response.status + " " + message.slice(0, 300));
+    const detail = data && data.error && data.error.message ? data.error.message : JSON.stringify(data);
+    throw new Error("OpenAI request failed (" + response.status + "): " + String(detail).slice(0, 500));
   }
-  return responseText(await response.json());
+
+  const text = responseText(data);
+  if (!text) throw new Error("OpenAI returned no output text.");
+  return text;
+}
+
+function jsonSchemaFormat(name, schema) {
+  return {
+    type: "json_schema",
+    name,
+    strict: true,
+    schema
+  };
+}
+
+const ANALYSIS_SCHEMA = {
+  type: "object",
+  properties: {
+    scores: {
+      type: "object",
+      properties: {
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        clarity: { type: "integer", minimum: 0, maximum: 100 },
+        fluency: { type: "integer", minimum: 0, maximum: 100 },
+        eyeContact: { type: "integer", minimum: 0, maximum: 100 },
+        expression: { type: "integer", minimum: 0, maximum: 100 },
+        postureFraming: { type: "integer", minimum: 0, maximum: 100 },
+        voiceDelivery: { type: "integer", minimum: 0, maximum: 100 }
+      },
+      required: ["confidence", "clarity", "fluency", "eyeContact", "expression", "postureFraming", "voiceDelivery"],
+      additionalProperties: false
+    },
+    evidence: {
+      type: "object",
+      properties: {
+        confidence: { type: "string" },
+        clarity: { type: "string" },
+        fluency: { type: "string" },
+        eyeContact: { type: "string" },
+        expression: { type: "string" },
+        postureFraming: { type: "string" },
+        voiceDelivery: { type: "string" }
+      },
+      required: ["confidence", "clarity", "fluency", "eyeContact", "expression", "postureFraming", "voiceDelivery"],
+      additionalProperties: false
+    },
+    summary: { type: "string" },
+    strengths: { type: "array", items: { type: "string" } },
+    improvements: { type: "array", items: { type: "string" } },
+    nextDrill: { type: "string" },
+    contentFeedback: { type: "string" },
+    visualFeedback: { type: "string" },
+    voiceFeedback: { type: "string" },
+    challengePassed: { type: "boolean" },
+    challengeFeedback: { type: "string" }
+  },
+  required: [
+    "scores", "evidence", "summary", "strengths", "improvements", "nextDrill",
+    "contentFeedback", "visualFeedback", "voiceFeedback", "challengePassed", "challengeFeedback"
+  ],
+  additionalProperties: false
+};
+
+const FEAR_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    intro: { type: "string" },
+    challenges: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          description: { type: "string" },
+          prompt: { type: "string" },
+          duration: { type: "integer", minimum: 30, maximum: 180 },
+          category: {
+            type: "string",
+            enum: ["Content creation", "Interview", "Storytelling", "Opinion", "Business", "Fun", "History", "Networking"]
+          },
+          successRule: { type: "string" },
+          why: { type: "string" }
+        },
+        required: ["id", "title", "description", "prompt", "duration", "category", "successRule", "why"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["title", "intro", "challenges"],
+  additionalProperties: false
+};
+
+function weightedOverall(scores) {
+  return Math.round(
+    scores.confidence * 0.20 +
+    scores.clarity * 0.15 +
+    scores.fluency * 0.15 +
+    scores.eyeContact * 0.15 +
+    scores.expression * 0.10 +
+    scores.postureFraming * 0.10 +
+    scores.voiceDelivery * 0.15
+  );
 }
 
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    app: "Spokyfy",
+    app: "Spokify",
     aiEnabled: Boolean(process.env.OPENAI_API_KEY),
-    model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-5.6-luna") : null
+    model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-6-astra") : null
   });
 });
 
@@ -124,135 +177,189 @@ app.post("/api/outline", async (req, res) => {
   const prompt = cleanString(req.body && req.body.prompt, 500);
   if (!prompt) return res.status(400).json({ error: "Prompt is required." });
 
-  const fallback = fallbackOutline(prompt);
-  if (!process.env.OPENAI_API_KEY) return res.json({ outline: fallback, provider: "spokyfy-local" });
-
   try {
-    const text = await callOpenAI([
-      {
+    const text = await callOpenAI({
+      content: [{
         type: "input_text",
         text:
-          "You are a speaking coach. Create exactly 3 short speaking-outline bullets for this prompt. " +
-          "Do not write a full script. Each bullet must be under 22 words. Return plain text with one bullet per line.\n\nPrompt: " +
-          prompt
-      }
-    ], 220);
+          "You are Spokify, a speaking coach. Create exactly 3 short outline bullets for this speaking prompt. " +
+          "Do not write a full script. Keep each bullet under 22 words. Plain text, one bullet per line.\n\nPrompt: " + prompt
+      }],
+      maxOutputTokens: 220
+    });
 
-    const outline = (text || "")
+    const outline = text
       .split("\n")
       .map((line) => line.replace(/^[-*•\d.)\s]+/, "").trim())
       .filter(Boolean)
       .slice(0, 3);
 
-    res.json({ outline: outline.length === 3 ? outline : fallback, provider: "openai" });
+    if (outline.length !== 3) throw new Error("Outline format was incomplete.");
+    res.json({ outline, provider: "openai" });
   } catch (error) {
-    console.error(error.message);
-    res.json({ outline: fallback, provider: "spokyfy-local", warning: "AI unavailable; local outline used." });
+    const status = error.code === "AI_NOT_CONFIGURED" ? 503 : 502;
+    res.status(status).json({ error: error.message });
   }
 });
-
 
 app.post("/api/script", async (req, res) => {
   const prompt = cleanString(req.body && req.body.prompt, 500);
   if (!prompt) return res.status(400).json({ error: "Prompt is required." });
 
-  const fallback =
-    "Start with your direct answer to the topic. Then explain your first reason with one real example. " +
-    "Add a second point that gives a different angle. Finish by repeating the main idea in one memorable sentence.";
-
-  if (!process.env.OPENAI_API_KEY) {
-    return res.json({ script: fallback, provider: "spokyfy-local" });
-  }
-
   try {
-    const text = await callOpenAI([
-      {
+    const script = await callOpenAI({
+      content: [{
         type: "input_text",
         text:
-          "You are a speaking coach. Write a natural 90-130 word sample spoken answer to this prompt. " +
-          "Use simple conversational English, a strong first sentence, two clear points, and a clean closing. " +
-          "Do not use headings, bullets, markdown, or overly formal language. The user should learn from it, not read it word-for-word.\n\nPrompt: " +
-          prompt
-      }
-    ], 350);
+          "You are Spokify, a speaking coach. Write a natural 90-130 word sample spoken answer. " +
+          "Use conversational English, a strong first sentence, two clear points, and a clean closing. " +
+          "No headings or markdown. It is a learning example, not a script the user must memorize.\n\nPrompt: " + prompt
+      }],
+      maxOutputTokens: 400
+    });
+    res.json({ script: cleanString(script, 1800), provider: "openai" });
+  } catch (error) {
+    const status = error.code === "AI_NOT_CONFIGURED" ? 503 : 502;
+    res.status(status).json({ error: error.message });
+  }
+});
 
-    res.json({ script: cleanString(text, 1800) || fallback, provider: "openai" });
+app.post("/api/fear-challenges", async (req, res) => {
+  const fear = cleanString(req.body && req.body.fear, 700);
+  if (!fear) return res.status(400).json({ error: "Tell Spokify what speaking or camera situation you want to get better at." });
+
+  try {
+    const text = await callOpenAI({
+      content: [{
+        type: "input_text",
+        text:
+          "You are Spokify, a practical speaking-confidence coach. The user describes a fear or difficulty related to speaking, camera confidence, " +
+          "presentations, interviews, social communication, networking, or content creation. Build EXACTLY 6 progressive, low-risk practice challenges. " +
+          "Challenge 1 must feel very easy and private; each next challenge should increase difficulty gradually. " +
+          "Every challenge must be completable inside Spokify with a camera/microphone speaking rep. " +
+          "Use measurable success rules based only on observable performance such as duration, completing a structure, speaking pace, fillers, lens orientation, framing, or delivering the requested content. " +
+          "Do not diagnose the user, do not infer mental health conditions, and do not create humiliation, harassment, dangerous exposure, or real-world confrontation tasks. " +
+          "IDs must be c1, c2, c3, c4, c5, c6.\n\nUser's fear/difficulty:\n" + fear
+      }],
+      maxOutputTokens: 1800,
+      format: jsonSchemaFormat("spokify_fear_challenges", FEAR_SCHEMA)
+    });
+
+    const plan = JSON.parse(text);
+    if (!Array.isArray(plan.challenges) || plan.challenges.length !== 6) {
+      throw new Error("AI did not return six challenges.");
+    }
+    res.json({ provider: "openai", plan });
   } catch (error) {
     console.error(error.message);
-    res.json({ script: fallback, provider: "spokyfy-local", warning: "AI unavailable; local sample used." });
+    const status = error.code === "AI_NOT_CONFIGURED" ? 503 : 502;
+    res.status(status).json({ error: error.message });
   }
 });
 
 app.post("/api/analyze", async (req, res) => {
   const body = req.body || {};
   const payload = {
-    prompt: cleanString(body.prompt, 500),
+    prompt: cleanString(body.prompt, 700),
     category: cleanString(body.category, 80),
     mode: cleanString(body.mode, 80),
-    transcript: cleanString(body.transcript, 7000),
-    metrics: body.metrics && typeof body.metrics === "object" ? body.metrics : {},
-    frames: Array.isArray(body.frames) ? body.frames.slice(0, 3) : []
+    transcript: cleanString(body.transcript, 9000),
+    rawMetrics: body.rawMetrics && typeof body.rawMetrics === "object" ? body.rawMetrics : {},
+    frames: Array.isArray(body.frames) ? body.frames.slice(0, 6) : [],
+    challenge: body.challenge && typeof body.challenge === "object"
+      ? {
+          title: cleanString(body.challenge.title, 200),
+          successRule: cleanString(body.challenge.successRule, 500)
+        }
+      : null
   };
 
-  const fallback = fallbackCoach(payload);
-  if (!process.env.OPENAI_API_KEY) return res.json(fallback);
+  if (!payload.prompt) return res.status(400).json({ error: "Prompt is required." });
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({
+      error: "AI scoring is unavailable because OPENAI_API_KEY is not configured. Spokify will not invent a fallback score."
+    });
+  }
+
+  const visualFrames = payload.frames.filter(
+    (frame) => typeof frame === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(frame)
+  );
 
   try {
-    const visualFrames = payload.frames.filter(
-      (frame) => typeof frame === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(frame)
-    );
-
     const instruction =
-      "You are Spokyfy, a supportive but specific camera-speaking coach. Review the practice session using the prompt, transcript, measured metrics, and optional camera snapshots. " +
-      "Do not infer sensitive traits, emotions, health, intelligence, or identity from images. Visual feedback must be limited to observable presentation behavior such as framing, face visibility, posture, and camera orientation. " +
-      "Return ONLY valid JSON with this exact shape: " +
-      '{"summary":"string","strengths":["string"],"improvements":["string"],"nextDrill":"string","contentFeedback":"string"}' +
-      ". strengths must have 2-3 items; improvements must have 2-4 items. Be concise, actionable, and encouraging.";
+      "You are the scoring engine for Spokify. Score this speaking performance from evidence, not from vibes and never randomly. " +
+      "Use the transcript and raw delivery metrics for speech-related scores, and the supplied camera snapshots for visual scores. " +
+      "If evidence is weak or a snapshot cannot support a conclusion, score conservatively and say so in the evidence string. " +
+      "CONFIDENCE means observable delivery confidence (steady completion, directness, vocal presence, composure in presentation), NOT the person's internal emotion or mental state. " +
+      "EYE CONTACT means apparent camera/lens orientation across snapshots; do not claim true gaze tracking. " +
+      "EXPRESSION means observable facial expressiveness/variation and visible emphasis, NOT emotion recognition. " +
+      "POSTURE/FRAMING means face visibility, centering, usable framing, and observable posture. " +
+      "VOICE DELIVERY uses pace, voice activity, volume consistency, pauses, fillers, and transcript evidence; do not claim acoustic properties you were not given. " +
+      "CLARITY measures how understandable and structured the spoken content is. FLUENCY measures continuity, fillers, and disruptive pauses. " +
+      "Give specific evidence for every score. Do not infer sensitive traits, identity, health, mood, intelligence, personality, or diagnosis from images. " +
+      "Return concise practical feedback. " +
+      (payload.challenge
+        ? "A locked challenge is attached. Set challengePassed=true ONLY if the available evidence supports that the success rule was actually met. Otherwise false and explain exactly what to retry."
+        : "No locked challenge is attached. Set challengePassed=false and challengeFeedback to 'No locked challenge attached.'");
 
-    const content = [
-      {
-        type: "input_text",
-        text:
-          instruction +
-          "\n\nSession data:\n" +
-          JSON.stringify({
-            prompt: payload.prompt,
-            category: payload.category,
-            mode: payload.mode,
-            transcript: payload.transcript,
-            metrics: payload.metrics
-          })
-      }
-    ];
+    const content = [{
+      type: "input_text",
+      text:
+        instruction +
+        "\n\nSession:\n" +
+        JSON.stringify({
+          prompt: payload.prompt,
+          category: payload.category,
+          mode: payload.mode,
+          transcript: payload.transcript,
+          rawMetrics: payload.rawMetrics,
+          challenge: payload.challenge,
+          snapshotCount: visualFrames.length
+        })
+    }];
 
-    visualFrames.forEach((frame) => content.push({ type: "input_image", image_url: frame }));
+    visualFrames.forEach((frame) => {
+      content.push({ type: "input_image", image_url: frame, detail: "low" });
+    });
 
-    const text = await callOpenAI(content, 1200);
-    let parsed;
-    try {
-      parsed = JSON.parse((text || "").trim());
-    } catch {
-      parsed = null;
-    }
+    const text = await callOpenAI({
+      content,
+      maxOutputTokens: 2200,
+      format: jsonSchemaFormat("spokify_performance_analysis", ANALYSIS_SCHEMA)
+    });
 
-    if (!parsed || typeof parsed !== "object") {
-      return res.json({ ...fallback, provider: "spokyfy-local", warning: "AI returned an unexpected format." });
-    }
+    const parsed = JSON.parse(text);
+    const scores = parsed.scores;
+    Object.keys(scores).forEach((key) => {
+      scores[key] = clamp(Math.round(Number(scores[key]) || 0), 0, 100);
+    });
 
     res.json({
       provider: "openai",
-      summary: cleanString(parsed.summary, 700) || fallback.summary,
-      strengths: Array.isArray(parsed.strengths) ? parsed.strengths.map((v) => cleanString(v, 260)).filter(Boolean).slice(0, 3) : fallback.strengths,
-      improvements: Array.isArray(parsed.improvements) ? parsed.improvements.map((v) => cleanString(v, 300)).filter(Boolean).slice(0, 4) : fallback.improvements,
-      nextDrill: cleanString(parsed.nextDrill, 500) || fallback.nextDrill,
-      contentFeedback: cleanString(parsed.contentFeedback, 500) || fallback.contentFeedback
+      model: process.env.OPENAI_MODEL || "gpt-6-astra",
+      overall: weightedOverall(scores),
+      scores,
+      evidence: parsed.evidence,
+      summary: cleanString(parsed.summary, 900),
+      strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
+      improvements: Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 5) : [],
+      nextDrill: cleanString(parsed.nextDrill, 700),
+      contentFeedback: cleanString(parsed.contentFeedback, 700),
+      visualFeedback: cleanString(parsed.visualFeedback, 700),
+      voiceFeedback: cleanString(parsed.voiceFeedback, 700),
+      challengePassed: Boolean(parsed.challengePassed),
+      challengeFeedback: cleanString(parsed.challengeFeedback, 700)
     });
   } catch (error) {
     console.error(error.message);
-    res.json({ ...fallback, provider: "spokyfy-local", warning: "Deep AI was unavailable, so local coaching was used." });
+    res.status(502).json({
+      error: "OpenAI analysis failed. No fallback score was generated.",
+      detail: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
   }
 });
 
+// ----- 1-on-1 Live signaling -----
 let playerQueue = [];
 let seekerQueue = [];
 const rooms = new Map();
@@ -360,5 +467,5 @@ app.get("*", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("Spokyfy running on port " + PORT);
+  console.log("Spokify running on port " + PORT);
 });
