@@ -35,7 +35,7 @@ async function callOpenAI({ content, maxOutputTokens = 1400, format = null }) {
     throw error;
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-6-astra";
+  const model = process.env.OPENAI_MODEL || "gpt-5.6-luna";
   const body = {
     model,
     max_output_tokens: maxOutputTokens,
@@ -53,9 +53,23 @@ async function callOpenAI({ content, maxOutputTokens = 1400, format = null }) {
     body: JSON.stringify(body)
   });
 
-  const data = await response.json().catch(() => ({}));
+  const raw = await response.text();
+  let data = {};
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        "OpenAI returned a non-JSON response (" + response.status + "): " + raw.slice(0, 300)
+      );
+    }
+  }
+
   if (!response.ok) {
-    const detail = data && data.error && data.error.message ? data.error.message : JSON.stringify(data);
+    const detail =
+      data && data.error && data.error.message
+        ? data.error.message
+        : raw || "Empty response from OpenAI";
     throw new Error("OpenAI request failed (" + response.status + "): " + String(detail).slice(0, 500));
   }
 
@@ -169,7 +183,7 @@ app.get("/api/health", (req, res) => {
     ok: true,
     app: "Spokify",
     aiEnabled: Boolean(process.env.OPENAI_API_KEY),
-    model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-6-astra") : null
+    model: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-5.6-luna") : null
   });
 });
 
@@ -336,7 +350,7 @@ app.post("/api/analyze", async (req, res) => {
 
     res.json({
       provider: "openai",
-      model: process.env.OPENAI_MODEL || "gpt-6-astra",
+      model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       overall: weightedOverall(scores),
       scores,
       evidence: parsed.evidence,
@@ -461,9 +475,19 @@ io.on("connection", (socket) => {
 });
 
 app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/")) return res.status(404).json({ error: "Not found" });
+  if (req.path.startsWith("/api/")) return res.status(404).json({ error: "API route not found." });
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
+
+app.use((error, req, res, next) => {
+  console.error("Unhandled server error:", error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({
+    error: "Spokify server error.",
+    detail: process.env.NODE_ENV === "development" ? String(error && error.message ? error.message : error) : undefined
+  });
+});
+
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
