@@ -4,16 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b0b0f" />
-  <meta name="description" content="Spokyfy is a camera-first speaking confidence trainer with practice prompts, progress tracking and AI coaching." />
-  <title>Spokyfy — Speak better on camera</title>
+  <meta name="description" content="Spokify is a camera-first speaking confidence trainer with practice prompts, progress tracking and AI coaching." />
+  <title>Spokify — Speak better on camera</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <button class="brand" data-view="dashboard" aria-label="Spokyfy home">
+      <button class="brand" data-view="dashboard" aria-label="Spokify home">
         <span class="brand-mark">S</span>
-        <span>Spokyfy</span>
+        <span>Spokify</span>
       </button>
 
       <nav class="nav">
@@ -58,7 +58,7 @@
             <div class="hero-copy">
               <div class="badge">TODAY'S REP</div>
               <h2>Stop thinking.<br />Start speaking.</h2>
-              <p>Spin a topic, turn on your camera, and talk for 60–180 seconds. Spokyfy scores the rep and gives you one clear thing to improve next.</p>
+              <p>Spin a topic, turn on your camera, and talk for 60–180 seconds. Spokify scores the rep and gives you one clear thing to improve next.</p>
               <button class="primary-button" id="heroStartBtn">Start camera practice <span>→</span></button>
             </div>
             <div class="orb-wrap" aria-hidden="true">
@@ -122,6 +122,11 @@
               <button class="chip" data-category="Networking">Networking</button>
             </div>
 
+            <button class="spin-topic-button" id="spinPromptBtn">
+              <span class="spin-disc">↻</span>
+              <span><b>Spin Topic</b><small id="spinHint">Pick a category, then spin</small></span>
+            </button>
+
             <label class="field-label">Speaking mode</label>
             <div class="segmented" id="modePicker">
               <button class="active" data-mode="Off-the-cuff">Off-the-cuff</button>
@@ -136,9 +141,8 @@
             </div>
 
             <label class="field-label">Topic</label>
-            <div class="prompt-box">
-              <p id="practicePrompt">What is one skill everyone should learn before they turn 20?</p>
-              <button class="icon-button" id="spinPromptBtn" title="Spin a new topic">↻</button>
+            <div class="prompt-box spin-result">
+              <p id="practicePrompt">Choose a category above, then tap Spin Topic.</p>
             </div>
 
             <button class="secondary-button full" id="outlineBtn">Give me a 3-point outline</button>
@@ -200,11 +204,16 @@
             </div>
           </div>
 
-          <div class="score-grid">
-            <div class="score-card"><span>Confidence</span><strong id="confidenceScore">—</strong><div class="mini-track"><i id="confidenceBar"></i></div></div>
-            <div class="score-card"><span>Clarity</span><strong id="clarityScore">—</strong><div class="mini-track"><i id="clarityBar"></i></div></div>
-            <div class="score-card"><span>Fluency</span><strong id="fluencyScore">—</strong><div class="mini-track"><i id="fluencyBar"></i></div></div>
-            <div class="score-card"><span>Camera focus</span><strong id="cameraScore">—</strong><div class="mini-track"><i id="cameraBar"></i></div></div>
+          <div class="analysis-error hidden" id="analysisError"></div>
+
+          <div class="score-grid ai-score-grid">
+            <div class="score-card"><span>Confidence</span><strong id="confidenceScore">—</strong><div class="mini-track"><i id="confidenceBar"></i></div><p id="confidenceEvidence"></p></div>
+            <div class="score-card"><span>Clarity</span><strong id="clarityScore">—</strong><div class="mini-track"><i id="clarityBar"></i></div><p id="clarityEvidence"></p></div>
+            <div class="score-card"><span>Fluency</span><strong id="fluencyScore">—</strong><div class="mini-track"><i id="fluencyBar"></i></div><p id="fluencyEvidence"></p></div>
+            <div class="score-card"><span>Eye contact</span><strong id="eyeContactScore">—</strong><div class="mini-track"><i id="eyeContactBar"></i></div><p id="eyeContactEvidence"></p></div>
+            <div class="score-card"><span>Expression</span><strong id="expressionScore">—</strong><div class="mini-track"><i id="expressionBar"></i></div><p id="expressionEvidence"></p></div>
+            <div class="score-card"><span>Posture / framing</span><strong id="postureFramingScore">—</strong><div class="mini-track"><i id="postureFramingBar"></i></div><p id="postureFramingEvidence"></p></div>
+            <div class="score-card"><span>Voice delivery</span><strong id="voiceDeliveryScore">—</strong><div class="mini-track"><i id="voiceDeliveryBar"></i></div><p id="voiceDeliveryEvidence"></p></div>
           </div>
 
           <div class="metrics-row">
@@ -213,6 +222,8 @@
             <div><span>Fillers</span><strong id="metricFillers">0</strong></div>
             <div><span>Long pauses</span><strong id="metricPauses">0</strong></div>
           </div>
+
+          <div class="challenge-result hidden" id="challengeResult"></div>
 
           <div class="coach-grid">
             <article class="panel">
@@ -233,12 +244,14 @@
               <span class="field-label">NEXT DRILL</span>
               <h3 id="nextDrill">Loading…</h3>
               <p class="muted" id="contentFeedback"></p>
+              <div class="micro-feedback"><b>Visual</b><span id="visualFeedback">—</span></div>
+              <div class="micro-feedback"><b>Voice</b><span id="voiceFeedback">—</span></div>
             </article>
           </div>
 
           <div class="review-actions">
             <button class="secondary-button" id="playRecordingBtn">Play recording</button>
-            <a class="secondary-button link-button hidden" id="downloadRecordingBtn" download="spokyfy-rep.webm">Download recording</a>
+            <a class="secondary-button link-button hidden" id="downloadRecordingBtn" download="spokify-rep.webm">Download recording</a>
             <button class="secondary-button" id="shareResultBtn">Share result</button>
             <button class="primary-button" id="practiceAgainBtn">Do another rep →</button>
           </div>
@@ -251,7 +264,7 @@
           <div>
             <div class="eyebrow">1-ON-1 LIVE</div>
             <h2>Practice with a real person.</h2>
-            <p class="muted">Players speak. Seekers listen and rate. Video connects peer-to-peer; Spokyfy only handles matchmaking and signaling.</p>
+            <p class="muted">Players speak. Seekers listen and rate. Video connects peer-to-peer; Spokify only handles matchmaking and signaling.</p>
           </div>
           <div class="status-dot"><span></span><b id="liveStatus">Not connected</b></div>
         </div>
@@ -301,8 +314,37 @@
       <section class="view" id="view-challenges">
         <div class="section-heading">
           <div>
-            <div class="eyebrow">PUBLIC PRACTICE TASKS</div>
-            <h2>Small challenges. Real progress.</h2>
+            <div class="eyebrow">ASK AI</div>
+            <h2>Tell Spokify what you are scared of.</h2>
+            <p class="muted">AI will turn your speaking or camera fear into a 6-step challenge path. Only the first task unlocks; pass it to unlock the next.</p>
+          </div>
+        </div>
+
+        <article class="panel fear-builder">
+          <label class="field-label" for="fearInput">What do you want to overcome?</label>
+          <textarea id="fearInput" rows="4" maxlength="700" placeholder="Example: I freeze when I speak English on camera, I avoid eye contact and forget what I wanted to say."></textarea>
+          <div class="fear-actions">
+            <span class="muted small" id="fearStatus">Your challenge path is saved on this device.</span>
+            <button class="primary-button" id="fearPlanBtn">Ask AI →</button>
+          </div>
+        </article>
+
+        <section class="ai-path hidden" id="aiPathSection">
+          <div class="path-heading">
+            <div>
+              <div class="eyebrow">YOUR LOCKED PATH</div>
+              <h2 id="aiPathTitle">Your challenge path</h2>
+              <p class="muted" id="aiPathIntro"></p>
+            </div>
+            <button class="secondary-button" id="resetAiPathBtn">Build a new path</button>
+          </div>
+          <div class="challenge-grid ai-challenge-grid" id="aiChallengeGrid"></div>
+        </section>
+
+        <div class="section-heading standard-challenges-heading">
+          <div>
+            <div class="eyebrow">QUICK CHALLENGES</div>
+            <h2>Or practice a ready-made task.</h2>
           </div>
         </div>
         <div class="challenge-grid" id="challengeGrid"></div>
