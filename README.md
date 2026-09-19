@@ -1,72 +1,101 @@
-# Spokyfy
+# Spokify
 
-Spokyfy is a camera-first speaking confidence trainer. It combines short recorded practice reps, browser speech metrics, optional AI coaching, XP and levels, challenges, and 1-on-1 WebRTC practice.
+Spokify is a camera-first speaking confidence trainer with real OpenAI API scoring, topic spinning, progressive AI challenge paths, XP/levels, and 1-on-1 WebRTC practice.
 
-## Features
+## What's included
 
-- Camera and microphone practice
-- 1, 2, or 3 minute speaking reps
-- Creator, Interview, Story, Opinion, Business, Fun, History, and Networking categories
-- Off-the-cuff and Deep Dive modes
-- Random topic spinner
-- Three-point speaking outline assistance
-- Browser video recording with local playback and download
-- Live transcript when the browser supports SpeechRecognition
-- WPM, filler-word, long-pause, voice-activity, completion, and camera-framing metrics
-- Confidence, clarity, fluency, camera-focus, and overall scoring
-- End-of-session coaching with strengths, improvements, next drill, and content feedback
-- Optional OpenAI text and vision coaching using transcript, metrics, and up to three low-resolution snapshots
-- XP, 50 levels, streaks, session history, score trend, personal best, and speaking time
-- Public-style speaking challenge board and shareable results
-- 1-on-1 Player/Seeker WebRTC matchmaking, synced round timer, and rating relay
+- Choose a speaking category, then use **Spin Topic** to get a random prompt from that category
+- Camera + microphone practice with 1, 2, or 3 minute sessions
+- Browser recording, playback, download, live transcript, WPM, filler count, pauses, voice activity, and framing evidence
+- **OpenAI API scoring only** — no local/random fallback score
+- AI scores: delivery confidence, clarity, fluency, apparent camera eye contact, facial expressiveness, posture/framing, and voice delivery
+- Each score includes a short evidence explanation
+- Overall score is a fixed weighted calculation from the AI-generated sub-scores
+- **Ask AI**: describe a speaking/camera fear and get a 6-step progressive challenge path
+- Challenge paths are sequentially locked: Task 2 unlocks only after AI confirms Task 1 passed, and so on
+- XP, 50 levels, streaks, history, score trend, personal best, and total speaking time
+- Ready-made quick challenges
+- 1-on-1 Player/Seeker WebRTC practice with rating relay
+
+## OpenAI setup
+
+Spokify requires an OpenAI API key for scoring and for AI-generated fear challenge paths.
+
+Set:
+
+    OPENAI_API_KEY=your_key
+
+Optional:
+
+    OPENAI_MODEL=gpt-6-astra
+
+If OPENAI_MODEL is not set, the server uses gpt-6-astra.
+
+The key stays on the server. Never put it inside public/app.js.
+
+If the AI API is unavailable or the key is missing, Spokify displays **AI score unavailable** and does not invent a fallback score.
+
+## How scoring works
+
+The browser collects raw measurable evidence:
+
+- transcript when browser SpeechRecognition is available
+- session duration / completion
+- words per minute
+- filler count
+- long pauses
+- voice activity and RMS volume consistency
+- optional FaceDetector visibility/centering metrics
+- up to six low-resolution camera snapshots across the session
+
+The server sends those inputs to the OpenAI Responses API using Structured Outputs. AI returns seven evidence-backed sub-scores. The server computes the final overall score with a fixed weighting:
+
+- Delivery confidence: 20%
+- Clarity: 15%
+- Fluency: 15%
+- Apparent camera eye contact: 15%
+- Facial expressiveness: 10%
+- Posture / framing: 10%
+- Voice delivery: 15%
+
+Visual analysis is limited to observable presentation behavior. Spokify does not use images to infer emotions, mental state, health, intelligence, identity, or personality.
+
+## Ask AI challenge path
+
+Open **Challenges → Ask AI**, describe the speaking or camera situation you want to improve, and Spokify generates exactly six gradual tasks.
+
+Only the first task starts unlocked. When a task is completed, the same OpenAI analysis checks the task's measurable success rule. The next task unlocks only when the AI response marks the current task as passed.
 
 ## Run locally
 
-Requires Node.js 18 or newer.
+Requires Node.js 18+.
 
     npm install
     npm start
 
-Then open http://localhost:3000
+Then open:
 
-Camera and microphone access normally require HTTPS in production. Browsers allow them on localhost for development.
+    http://localhost:3000
 
-## Deep AI coaching
-
-The app works without an AI key. In that case the analysis route uses deterministic local coaching based on the measured speaking metrics.
-
-For deeper coaching, set these server environment variables:
-
-    OPENAI_API_KEY=your_key
-    OPENAI_MODEL=gpt-5.6-luna
-
-OPENAI_MODEL is optional. The server defaults to gpt-5.6-luna.
-
-The API key stays server-side and must never be added to public/app.js.
-
-When deep AI is enabled, the analysis route can receive the transcript, measured speaking metrics, and up to three low-resolution camera snapshots. The coaching prompt restricts visual feedback to observable presentation behavior such as framing, posture, face visibility, and camera orientation.
+Camera and microphone access normally require HTTPS outside localhost.
 
 ## Deploy
 
-This project runs as one Node service. Deploy it to a host that supports persistent Node processes and WebSockets, such as Render, Railway, Fly.io, or a VPS.
+Deploy as a persistent Node/WebSocket service, for example on Render, Railway, Fly.io, or a VPS.
 
-Build command:
+Build:
 
     npm install
 
-Start command:
+Start:
 
     npm start
 
-Set OPENAI_API_KEY only when you want deep AI coaching.
-
-## Camera scoring
-
-When the browser supports the FaceDetector API, Spokyfy uses face visibility and centered framing as a camera-focus proxy. It does not claim to measure emotions, personality, intelligence, or mental state. Browsers without FaceDetector receive a neutral camera score and can still use every other metric.
+Live 1-on-1 mode uses Socket.IO + WebRTC, so the host must support WebSockets.
 
 ## Privacy
 
-- The full practice recording stays in the browser unless the user manually downloads it.
-- The Node server does not store practice recordings.
-- Live mode video and audio use peer-to-peer WebRTC. The server only handles matchmaking and signaling.
-- Deep AI analysis only uses data sent to the analysis endpoint.
+- Full practice video stays in the browser unless the user manually downloads it.
+- The Node server does not store recordings.
+- AI scoring receives the transcript, raw metrics, challenge rule when relevant, and up to six low-resolution snapshots.
+- 1-on-1 video/audio is peer-to-peer WebRTC; the server relays signaling only.
