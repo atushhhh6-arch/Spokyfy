@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0b0f" />
+  <meta name="description" content="Spokyfy is a camera-first speaking confidence trainer with practice prompts, progress tracking and AI coaching." />
+  <title>Spokyfy — Speak better on camera</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <button class="brand" data-view="dashboard" aria-label="Spokyfy home">
+        <span class="brand-mark">S</span>
+        <span>Spokyfy</span>
+      </button>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span> Home</button>
+        <button class="nav-item" data-view="practice"><span>●</span> Practice</button>
+        <button class="nav-item" data-view="live"><span>◉</span> 1-on-1 Live</button>
+        <button class="nav-item" data-view="challenges"><span>✦</span> Challenges</button>
+        <button class="nav-item" data-view="progress"><span>↗</span> Progress</button>
+      </nav>
+
+      <div class="sidebar-card">
+        <div class="tiny-label">YOUR LEVEL</div>
+        <div class="level-row">
+          <strong id="sideLevel">1</strong>
+          <span id="sideLevelName">Warm-up</span>
+        </div>
+        <div class="xp-track"><span id="sideXpBar"></span></div>
+        <div class="muted small"><span id="sideXpText">0 / 250 XP</span></div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="avatar">A</div>
+        <div>
+          <strong>Speaker</strong>
+          <div class="muted small"><span id="streakText">0 day streak</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">CAMERA CONFIDENCE TRAINER</div>
+          <h1 id="pageTitle">Build confidence one rep at a time.</h1>
+        </div>
+        <button class="pill-button" id="quickPracticeBtn">Start a rep <span>→</span></button>
+      </header>
+
+      <section class="view active" id="view-dashboard">
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="hero-copy">
+              <div class="badge">TODAY'S REP</div>
+              <h2>Stop thinking.<br />Start speaking.</h2>
+              <p>Spin a topic, turn on your camera, and talk for 60–180 seconds. Spokyfy scores the rep and gives you one clear thing to improve next.</p>
+              <button class="primary-button" id="heroStartBtn">Start camera practice <span>→</span></button>
+            </div>
+            <div class="orb-wrap" aria-hidden="true">
+              <div class="orb orb-one"></div>
+              <div class="orb orb-two"></div>
+              <div class="mic-core">●</div>
+            </div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-top"><span>Current streak</span><span class="stat-icon">⚡</span></div>
+            <div class="big-stat"><span id="dashStreak">0</span><small>days</small></div>
+            <p>Consistency beats one perfect performance.</p>
+          </article>
+        </div>
+
+        <div class="three-grid">
+          <article class="panel">
+            <div class="panel-head"><span>LEVEL</span><span id="dashLevelName">Warm-up</span></div>
+            <div class="level-number" id="dashLevel">01</div>
+            <div class="xp-track large"><span id="dashXpBar"></span></div>
+            <div class="split muted small"><span id="dashXpCurrent">0 XP</span><span id="dashXpNext">250 XP</span></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span>REPS DONE</span><span>ALL TIME</span></div>
+            <div class="big-number" id="dashReps">0</div>
+            <p class="muted">Every recorded practice counts.</p>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span>LAST SCORE</span><span>/ 100</span></div>
+            <div class="big-number" id="dashScore">—</div>
+            <p class="muted" id="dashScoreText">Complete your first rep to unlock feedback.</p>
+          </article>
+        </div>
+
+        <article class="panel prompt-preview">
+          <div>
+            <div class="badge ghost">DAILY CHALLENGE</div>
+            <h3 id="dailyPrompt">Explain a belief you changed your mind about.</h3>
+            <p class="muted">90 seconds · Off-the-cuff · +20 bonus XP</p>
+          </div>
+          <button class="secondary-button" id="dailyStartBtn">Try challenge</button>
+        </article>
+      </section>
+
+      <section class="view" id="view-practice">
+        <div class="practice-layout">
+          <aside class="setup-panel" id="setupPanel">
+            <div class="section-kicker">01 / SETUP</div>
+            <h2>Build your rep</h2>
+
+            <label class="field-label">Category</label>
+            <div class="chip-grid" id="categoryChips">
+              <button class="chip active" data-category="Content creation">Creator</button>
+              <button class="chip" data-category="Interview">Interview</button>
+              <button class="chip" data-category="Storytelling">Story</button>
+              <button class="chip" data-category="Opinion">Opinion</button>
+              <button class="chip" data-category="Business">Business</button>
+              <button class="chip" data-category="Fun">Fun</button>
+              <button class="chip" data-category="History">History</button>
+              <button class="chip" data-category="Networking">Networking</button>
+            </div>
+
+            <label class="field-label">Speaking mode</label>
+            <div class="segmented" id="modePicker">
+              <button class="active" data-mode="Off-the-cuff">Off-the-cuff</button>
+              <button data-mode="Deep dive">Deep dive</button>
+            </div>
+
+            <label class="field-label">Duration</label>
+            <div class="segmented three" id="durationPicker">
+              <button class="active" data-duration="60">1 min</button>
+              <button data-duration="120">2 min</button>
+              <button data-duration="180">3 min</button>
+            </div>
+
+            <label class="field-label">Topic</label>
+            <div class="prompt-box">
+              <p id="practicePrompt">What is one skill everyone should learn before they turn 20?</p>
+              <button class="icon-button" id="spinPromptBtn" title="Spin a new topic">↻</button>
+            </div>
+
+            <button class="secondary-button full" id="outlineBtn">Give me a 3-point outline</button>
+            <div class="outline-box hidden" id="outlineBox"></div>
+
+            <div class="privacy-note">
+              <strong>Privacy first.</strong> Your recording stays in your browser. Deep AI only receives the transcript, metrics, and optional snapshots you choose to send.
+            </div>
+          </aside>
+
+          <section class="camera-stage">
+            <div class="stage-top">
+              <div>
+                <div class="section-kicker">02 / CAMERA</div>
+                <h2 id="stageHeading">Ready when you are.</h2>
+              </div>
+              <div class="timer-pill" id="timerPill">01:00</div>
+            </div>
+
+            <div class="video-shell" id="videoShell">
+              <video id="cameraVideo" autoplay muted playsinline></video>
+              <div class="camera-placeholder" id="cameraPlaceholder">
+                <div class="camera-icon">◉</div>
+                <strong>Camera preview</strong>
+                <span>Allow camera + microphone to begin.</span>
+              </div>
+              <div class="recording-indicator hidden" id="recordingIndicator"><span></span> REC</div>
+              <div class="audio-meter"><span id="audioMeter"></span></div>
+              <div class="countdown hidden" id="countdown">3</div>
+            </div>
+
+            <div class="transcript-card">
+              <div class="split">
+                <span class="field-label no-margin">LIVE TRANSCRIPT</span>
+                <span class="muted small" id="wordCounter">0 words</span>
+              </div>
+              <p id="liveTranscript">Your transcript will appear here while you speak.</p>
+            </div>
+
+            <div class="stage-actions">
+              <button class="primary-button" id="startPracticeBtn">Enable camera & start</button>
+              <button class="danger-button hidden" id="finishPracticeBtn">Finish rep</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="results-panel hidden" id="resultsPanel">
+          <div class="results-hero">
+            <div>
+              <div class="section-kicker">03 / REVIEW</div>
+              <h2>Your speaking report</h2>
+              <p class="muted" id="analysisProvider">Analyzing your rep…</p>
+            </div>
+            <div class="score-ring">
+              <strong id="overallScore">—</strong>
+              <span>/100</span>
+            </div>
+          </div>
+
+          <div class="score-grid">
+            <div class="score-card"><span>Confidence</span><strong id="confidenceScore">—</strong><div class="mini-track"><i id="confidenceBar"></i></div></div>
+            <div class="score-card"><span>Clarity</span><strong id="clarityScore">—</strong><div class="mini-track"><i id="clarityBar"></i></div></div>
+            <div class="score-card"><span>Fluency</span><strong id="fluencyScore">—</strong><div class="mini-track"><i id="fluencyBar"></i></div></div>
+            <div class="score-card"><span>Camera focus</span><strong id="cameraScore">—</strong><div class="mini-track"><i id="cameraBar"></i></div></div>
+          </div>
+
+          <div class="metrics-row">
+            <div><span>Words</span><strong id="metricWords">0</strong></div>
+            <div><span>WPM</span><strong id="metricWpm">0</strong></div>
+            <div><span>Fillers</span><strong id="metricFillers">0</strong></div>
+            <div><span>Long pauses</span><strong id="metricPauses">0</strong></div>
+          </div>
+
+          <div class="coach-grid">
+            <article class="panel">
+              <div class="badge">AI COACH</div>
+              <h3 id="coachSummary">Reviewing your performance…</h3>
+              <div class="feedback-columns">
+                <div>
+                  <span class="field-label">WHAT WORKED</span>
+                  <ul id="strengthList"></ul>
+                </div>
+                <div>
+                  <span class="field-label">IMPROVE NEXT</span>
+                  <ul id="improvementList"></ul>
+                </div>
+              </div>
+            </article>
+            <article class="panel drill-card">
+              <span class="field-label">NEXT DRILL</span>
+              <h3 id="nextDrill">Loading…</h3>
+              <p class="muted" id="contentFeedback"></p>
+            </article>
+          </div>
+
+          <div class="review-actions">
+            <button class="secondary-button" id="playRecordingBtn">Play recording</button>
+            <a class="secondary-button link-button hidden" id="downloadRecordingBtn" download="spokyfy-rep.webm">Download recording</a>
+            <button class="secondary-button" id="shareResultBtn">Share result</button>
+            <button class="primary-button" id="practiceAgainBtn">Do another rep →</button>
+          </div>
+          <video class="playback hidden" id="playbackVideo" controls playsinline></video>
+        </section>
+      </section>
+
+      <section class="view" id="view-live">
+        <div class="live-header">
+          <div>
+            <div class="eyebrow">1-ON-1 LIVE</div>
+            <h2>Practice with a real person.</h2>
+            <p class="muted">Players speak. Seekers listen and rate. Video connects peer-to-peer; Spokyfy only handles matchmaking and signaling.</p>
+          </div>
+          <div class="status-dot"><span></span><b id="liveStatus">Not connected</b></div>
+        </div>
+
+        <div class="role-grid">
+          <button class="role-card" id="playerRoleBtn">
+            <span class="role-number">01</span>
+            <h3>Be the Player</h3>
+            <p>Get matched, receive a prompt, speak for 90 seconds, then get a rating.</p>
+            <b>Find a Seeker →</b>
+          </button>
+          <button class="role-card" id="seekerRoleBtn">
+            <span class="role-number">02</span>
+            <h3>Be the Seeker</h3>
+            <p>Listen to another speaker, stay supportive, and rate the rep at the end.</p>
+            <b>Find a Player →</b>
+          </button>
+        </div>
+
+        <div class="live-room hidden" id="liveRoom">
+          <div class="live-videos">
+            <div class="live-video-card">
+              <span>You</span>
+              <video id="liveLocalVideo" autoplay muted playsinline></video>
+            </div>
+            <div class="live-video-card">
+              <span>Partner</span>
+              <video id="liveRemoteVideo" autoplay playsinline></video>
+            </div>
+          </div>
+          <div class="live-controls">
+            <div>
+              <span class="field-label">ROUND</span>
+              <strong id="liveTimer">01:30</strong>
+            </div>
+            <div id="ratingBox" class="rating-box hidden">
+              <span>Rate this rep</span>
+              <div>
+                <button data-rating="1">1</button><button data-rating="2">2</button><button data-rating="3">3</button><button data-rating="4">4</button><button data-rating="5">5</button>
+              </div>
+            </div>
+            <button class="danger-button" id="leaveLiveBtn">Leave room</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-challenges">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">PUBLIC PRACTICE TASKS</div>
+            <h2>Small challenges. Real progress.</h2>
+          </div>
+        </div>
+        <div class="challenge-grid" id="challengeGrid"></div>
+      </section>
+
+      <section class="view" id="view-progress">
+        <div class="progress-top">
+          <article class="panel level-panel">
+            <span class="field-label">CURRENT LEVEL</span>
+            <div class="progress-level"><strong id="progressLevel">01</strong><span id="progressLevelName">Warm-up</span></div>
+            <div class="xp-track large"><span id="progressXpBar"></span></div>
+            <p class="muted" id="progressXpText">0 XP until Level 2</p>
+          </article>
+          <article class="panel">
+            <span class="field-label">BEST SCORE</span>
+            <div class="big-number" id="bestScore">—</div>
+            <p class="muted">Personal best across your saved reps.</p>
+          </article>
+          <article class="panel">
+            <span class="field-label">TOTAL SPEAKING</span>
+            <div class="big-number"><span id="totalMinutes">0</span><small> min</small></div>
+            <p class="muted">Time spent doing deliberate camera practice.</p>
+          </article>
+        </div>
+
+        <article class="panel">
+          <div class="panel-head"><span>RECENT SCORE TREND</span><span>LAST 10 REPS</span></div>
+          <div class="chart" id="scoreChart"></div>
+        </article>
+
+        <article class="panel history-panel">
+          <div class="panel-head"><span>SESSION HISTORY</span><span id="historyCount">0 REPS</span></div>
+          <div id="historyList" class="history-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
